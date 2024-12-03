@@ -1,0 +1,6 @@
+database:
+  host: "13.201.216.64"
+  port: 3306
+  name: "claims_automation"
+  user: "automation"
+  password: "Welcome@2024*"
