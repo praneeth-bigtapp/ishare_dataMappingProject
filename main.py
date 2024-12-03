@@ -16,6 +16,7 @@ import mysql.connector
 from mysql.connector import Error
 from decimal import Decimal
 from datetime import date
+from flask_cors import CORS
 
 # Configure logging
 log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log')
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
+CORS(app)
 
 # Configure SQLAlchemy
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
