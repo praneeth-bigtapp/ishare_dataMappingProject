@@ -71,6 +71,7 @@ def connect_to_mysql():
 def upload_mapping():
     """
     API endpoint to upload an Excel file and create a mapping table in the database.
+    Accepts multipart/form-data with a file field.
     The table name will be derived from the Excel filename.
     """
     try:
@@ -79,7 +80,7 @@ def upload_mapping():
             logger.error("No file part in the request")
             return jsonify({"error": "No file part in the request"}), 400
 
-        file = request.files['file']
+        file = request.files['file']  # This handles multipart/form-data
         if file.filename == '':
             logger.error("No file selected for uploading")
             return jsonify({"error": "No file selected for uploading"}), 400
@@ -156,17 +157,17 @@ def upload_mapping():
 def upload_data_mapped():
     """
     API to upload Excel data to a table using mapping configuration.
+    Accepts multipart/form-data with a file field and mapping_table field.
     The table name will be derived from the Excel filename.
     Required form parameters:
-    - file: Excel file with source data
+    - file: Excel file with source data (multipart/form-data)
     - mapping_table: Name of the mapping table containing source-to-target column mappings
     """
     try:
-        # Validate request
         if 'file' not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
+            return jsonify({"error": "No file part"}), 400
             
-        file = request.files['file']
+        file = request.files['file']  # This handles multipart/form-data
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
             
