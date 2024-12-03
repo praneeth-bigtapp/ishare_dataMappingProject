@@ -151,36 +151,46 @@ def upload_mapping():
 @app.route("/uploaData", methods=["POST"])
 def upload_data_mapped():
     """
-    API to upload data from an Excel file to a specified database table using a mapping table.
+    API to upload Excel data to a table using mapping configuration.
+    The table name will be derived from the Excel filename.
+    Required form parameters:
+    - file: Excel file with source data
+    - mapping_table: Name of the mapping table containing source-to-target column mappings
     """
-    # Check if a file is present in the request
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part in the request"}), 400
+    try:
+        # Validate request
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+            
+        mapping_table = request.form.get('mapping_table')
+        if not mapping_table:
+            return jsonify({"error": "Mapping table name is required"}), 400
+            
+        # Save uploaded file
+        file_path = os.path.join(UPLOAD_FOLDER, secure_filename(file.filename))
+        file.save(file_path)
+        
+        try:
+            # Process file and create table
+            result = upload_data_with_mapping(file_path, mapping_table)
+            
+            if "error" in result:
+                return jsonify(result), 500
+                
+            return jsonify(result), 200
+            
+        finally:
+            # Clean up uploaded file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    file = request.files['file']
-
-    # Check if a file was selected
-    if file.filename == '':
-        return jsonify({"error": "No file selected for uploading"}), 400
-
-    # Save the uploaded file
-    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(file_path)
-
-    # Get the mapping table and target table from the request
-    mapping_table = request.form.get('mapping_table')
-    target_table = request.form.get('target_table')
-    if not mapping_table or not target_table:
-        return jsonify({"error": "Mapping table and target table names must be provided."}), 400
-
-    # Call the logic to upload data to the target table
-    result = upload_data_with_mapping(file_path, mapping_table, target_table)
-
-    # Handle errors
-    if "error" in result:
-        return jsonify(result), 500
-
-    return jsonify(result), 200
 
 @app.route('/ftpConnection', methods=['POST'])
 def connect_and_list():
