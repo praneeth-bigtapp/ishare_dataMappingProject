@@ -16,7 +16,7 @@ import mysql.connector
 from mysql.connector import Error
 from decimal import Decimal
 from datetime import date
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 
 # Configure logging
 log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log')
@@ -67,6 +67,7 @@ def connect_to_mysql():
         return None
 
 @app.route("/uploadMapping", methods=["POST"])
+@cross_origin(origins="*")
 def upload_mapping():
     """
     API endpoint to upload an Excel file and create a mapping table in the database.
@@ -151,6 +152,7 @@ def upload_mapping():
 
 
 @app.route("/uploaData", methods=["POST"])
+@cross_origin(origins="*")
 def upload_data_mapped():
     """
     API to upload Excel data to a table using mapping configuration.
@@ -195,6 +197,7 @@ def upload_data_mapped():
 
 
 @app.route('/ftpConnection', methods=['POST'])
+@cross_origin(origins="*")
 def connect_and_list():
     """
     API to connect to an FTP server and list the files in a directory.
@@ -298,6 +301,7 @@ def connect_and_list():
 
 
 @app.route("/getMappingTables", methods=["GET"])
+@cross_origin(origins="*")
 def get_mapping_tables():
     """
     API endpoint to get all available mapping table names in the database.
