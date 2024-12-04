@@ -1,30 +1,60 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS, cross_origin
+from werkzeug.utils import secure_filename
+import os
+import logging
+import traceback
+from datetime import datetime
+from db_connection import connect_to_mysql, load_db_config
 from datamapping import create_mapping_table_from_excel
 from data_upload import upload_data_with_mapping
 from ftp_connection import connect_and_list_files
-import os
-from werkzeug.security import generate_password_hash, check_password_hash
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, timedelta
 import jwt
 import re
-from werkzeug.utils import secure_filename
-import logging
-import traceback
-from logging.handlers import RotatingFileHandler
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_sqlalchemy import SQLAlchemy
 import mysql.connector
 from mysql.connector import Error
 from decimal import Decimal
 from datetime import date
-from flask_cors import CORS, cross_origin
+import logging
+import traceback
+from logging.handlers import RotatingFileHandler
 
 # Configure logging
 log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log')
-logging.basicConfig(
-    handlers=[RotatingFileHandler(log_file, maxBytes=100000, backupCount=5)],
-    level=logging.DEBUG,
-    format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+
+# Create a custom formatter
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+# Configure file handler with a more robust configuration
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5,
+    delay=True  # Don't create file until first log
+)
+file_handler.setFormatter(formatter)
+
+# Configure console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# Remove any existing handlers
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Add our handlers
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+# Create logger for this module
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
@@ -358,6 +388,9 @@ def get_mapping_tables():
         if connection:
             connection.close()
             logger.info("Database connection closed")
+
+
+
 
 
 # Run the Flask app
