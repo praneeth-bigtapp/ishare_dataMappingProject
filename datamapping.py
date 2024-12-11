@@ -1,230 +1,264 @@
 from db_connection import connect_to_mysql
 import pandas as pd
 import logging
-import re
 import traceback
 
 logger = logging.getLogger(__name__)
 
-def sanitize_column_name(name):
-    """Sanitize column names for SQL table creation"""
-    try:
-        # Remove special characters and spaces, replace with underscore
-        sanitized = re.sub(r'[^a-zA-Z0-9]', '_', str(name))
-        # Ensure it starts with a letter
-        if sanitized[0].isdigit():
-            sanitized = 'col_' + sanitized
-        return sanitized.lower()
-    except Exception as e:
-        logger.error(f"Error sanitizing column name '{name}': {str(e)}")
-        raise
-
-def parse_column_mappings(column_name):
-    """Parse column name into source and target mappings."""
-    parts = [p.strip() for p in column_name.split(',')]
-    source_col = parts[0]
-    target_cols = parts[1:] if len(parts) > 1 else []
-    return source_col, target_cols
-
-def validate_column_mapping(source_col, target_cols, target_table_schema):
-    """Validate if the column mappings are valid according to target schema."""
-    invalid_cols = []
-    for col in target_cols:
-        if col not in target_table_schema:
-            invalid_cols.append(col)
-    return invalid_cols
-
-def create_mapping_table_from_excel(file_path, table_name):
+def upload_mapping(file_path):
     """
-    Creates a mapping table based on the Excel file structure.
-    Handles multiple column mappings and data validation.
+    Upload mappings from Excel file to the mapping_table.
+    Required columns in Excel:
+    - tpa_id
+    - source_database
+    - source_Table
+    - source_Column
+    - target_database
+    - target_table
+    - target_column
+    - transformation_logic
     """
-    connection = None
-    cursor = None
     try:
-        logger.info(f"Reading Excel file: {file_path}")
-        data = pd.read_excel(file_path)
+        # Read Excel file
+        df = pd.read_excel(file_path)
+        logger.info(f"Read {len(df)} rows from Excel file")
         
-        logger.info(f"Excel columns found: {', '.join(data.columns)}")
+        # Validate required columns
+        required_columns = [
+            'tpa_id', 'source_database', 'source_Table', 
+            'source_Column', 'target_database', 'target_table', 
+            'target_column', 'transformation_logic'
+        ]
         
-        # Parse all column mappings first
-        column_mappings = {}
-        unmapped_columns = []
-        for col in data.columns:
-            if ',' in col:
-                source_col, target_cols = parse_column_mappings(col)
-                sanitized_source = sanitize_column_name(source_col)
-                sanitized_targets = [sanitize_column_name(tc) for tc in target_cols]
-                column_mappings[sanitized_source] = sanitized_targets
-            else:
-                unmapped_columns.append(sanitize_column_name(col))
-        
-        logger.info(f"Found mappings: {column_mappings}")
-        logger.info(f"Unmapped columns: {unmapped_columns}")
-
-        # Verify required columns
-        if 'tpa_id' not in data.columns:
-            logger.error("Required column 'tpa_id' not found in Excel file")
-            return {"error": "Excel file must contain 'tpa_id' column"}
-
-        # Connect to database
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return {
+                "error": f"Missing required columns: {', '.join(missing_columns)}",
+                "status": "error"
+            }
+            
         connection = connect_to_mysql()
         if not connection:
-            return {"error": "Failed to connect to database"}
-
-        cursor = connection.cursor()
-
-        # Create columns list for table creation
-        columns = []
-        processed_columns = set()
-        
-        # Add mapping_id if not present
-        has_mapping_id = 'mapping_id' in [col.lower() for col in data.columns]
-        if not has_mapping_id:
-            columns.append("mapping_id INT AUTO_INCREMENT PRIMARY KEY")
-        
-        # Process all columns including mapped ones
-        for col in data.columns:
-            if ',' in col:
-                source_col, _ = parse_column_mappings(col)
-                sanitized_col = sanitize_column_name(source_col)
-            else:
-                sanitized_col = sanitize_column_name(col)
+            return {"error": "Database connection failed"}
             
-            if sanitized_col not in processed_columns:
-                if sanitized_col.lower() == 'mapping_id' and has_mapping_id:
-                    columns.append(f"{sanitized_col} INT AUTO_INCREMENT PRIMARY KEY")
-                elif sanitized_col.lower() == 'tpa_id':
-                    columns.append(f"{sanitized_col} INT NOT NULL")
-                else:
-                    columns.append(f"{sanitized_col} VARCHAR(255)")
-                processed_columns.add(sanitized_col)
-                
-                # Add columns for mapped fields if they don't exist
-                if sanitized_col in column_mappings:
-                    for target_col in column_mappings[sanitized_col]:
-                        if target_col not in processed_columns:
-                            columns.append(f"{target_col} VARCHAR(255)")
-                            processed_columns.add(target_col)
-
-        # Add timestamp columns
-        columns.extend([
-            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-            "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
-        ])
-
-        # Create table
-        create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                {', '.join(columns)}
-            );
-        """
+        cursor = connection.cursor()
         
-        try:
-            cursor.execute(create_table_sql)
-            logger.info(f"Table {table_name} created successfully")
-
-            # Add foreign key constraint with unique name
-            add_constraint_sql = f"""
-                ALTER TABLE {table_name}
-                ADD CONSTRAINT `fk_{table_name}_tpa_id` 
-                FOREIGN KEY (tpa_id) 
-                REFERENCES ftpa_master(ftp_id);
-            """
-            try:
-                cursor.execute(add_constraint_sql)
-                logger.info(f"Foreign key constraint added to {table_name}")
-            except Exception as e:
-                if e.errno == 1826:  # Duplicate foreign key constraint
-                    logger.warning(f"Foreign key constraint already exists on {table_name}")
-                else:
-                    raise
-        except Exception as e:
-            logger.error(f"Error creating table: {str(e)}")
-            raise
-
-        # Prepare columns for insert
-        insert_columns = []
-        for col in data.columns:
-            if ',' in col:
-                source_col, target_cols = parse_column_mappings(col)
-                sanitized_source = sanitize_column_name(source_col)
-                insert_columns.append(sanitized_source)
-                insert_columns.extend([sanitize_column_name(tc) for tc in target_cols])
-            else:
-                sanitized_col = sanitize_column_name(col)
-                if sanitized_col.lower() != 'mapping_id' or has_mapping_id:
-                    insert_columns.append(sanitized_col)
-
-        placeholders = ', '.join(['%s'] * len(insert_columns))
-
-        # Insert data
-        insert_sql = f"""
-            INSERT INTO {table_name} ({', '.join(insert_columns)})
-            VALUES ({placeholders});
+        # Create mapping_table if it doesn't exist
+        create_table_sql = """
+        CREATE TABLE IF NOT EXISTS mapping_table (
+            mapping_id INT AUTO_INCREMENT PRIMARY KEY,
+            tpa_id INT NOT NULL,
+            source_database VARCHAR(255) NOT NULL,
+            source_Table VARCHAR(255) NOT NULL,
+            source_Column VARCHAR(255) NOT NULL,
+            target_database VARCHAR(255) NOT NULL,
+            target_table VARCHAR(255) NOT NULL,
+            target_column VARCHAR(255) NOT NULL,
+            transformation_logic TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
         """
-
-        rows_processed = 0
+        cursor.execute(create_table_sql)
+        
+        # Insert mappings
+        inserted_count = 0
         errors = []
-        for _, row in data.iterrows():
+        
+        for idx, row in df.iterrows():
             try:
-                values = []
-                for col in data.columns:
-                    if ',' in col:
-                        source_col, target_cols = parse_column_mappings(col)
-                        # Add source column value
-                        values.append(row[source_col])
-                        # Add same value for all target columns
-                        values.extend([row[source_col]] * len(target_cols))
-                    else:
-                        sanitized_col = sanitize_column_name(col)
-                        if sanitized_col.lower() != 'mapping_id' or has_mapping_id:
-                            values.append(row[col])
+                # Prepare insert data
+                insert_data = {
+                    'tpa_id': row['tpa_id'],
+                    'source_database': row['source_database'],
+                    'source_table': row['source_Table'],
+                    'source_column': row['source_Column'],
+                    'target_database': row['target_database'],
+                    'target_table': row['target_table'],
+                    'target_column': row['target_column'],
+                    'transformation_logic': row['transformation_logic']  
+                }
                 
-                cursor.execute(insert_sql, values)
-                rows_processed += 1
-                if rows_processed % 100 == 0:
-                    logger.info(f"Processed {rows_processed} rows")
+                # Generate SQL
+                columns = ', '.join(f"`{col}`" for col in insert_data.keys())
+                placeholders = ', '.join(['%s'] * len(insert_data))
+                insert_sql = f"""
+                INSERT INTO mapping_table ({columns})
+                VALUES ({placeholders})
+                """
+                
+                cursor.execute(insert_sql, list(insert_data.values()))
+                connection.commit()
+                inserted_count += 1
+                
             except Exception as e:
-                error_msg = f"Error in row {rows_processed + 1}: {str(e)}"
+                error_msg = f"Error in row {idx + 1}: {str(e)}"
                 logger.error(error_msg)
-                logger.error(f"Row data: {row.to_dict()}")
                 errors.append(error_msg)
                 continue
-
-        connection.commit()
         
         result = {
-            "message": f"Successfully processed {rows_processed} rows",
-            "table_name": table_name,
-            "mappings": column_mappings,
-            "unmapped_columns": unmapped_columns
+            "message": f"Successfully uploaded {inserted_count} mappings",
+            "total_rows": len(df),
+            "inserted_rows": inserted_count,
+            "status": "success"
         }
         
         if errors:
-            result["warnings"] = errors
+            result["errors"] = errors
+            result["status"] = "partial_success"
             
         return result
-
+        
     except Exception as e:
-        logger.error(f"Error in create_mapping_table_from_excel: {str(e)}")
+        error_msg = f"Error uploading mappings: {str(e)}"
+        logger.error(error_msg)
         logger.error(traceback.format_exc())
-        if connection:
-            connection.rollback()
-        return {"error": str(e)}
+        return {"error": error_msg, "status": "error"}
+        
     finally:
-        if cursor:
+        if 'cursor' in locals():
             cursor.close()
-        if connection and connection.is_connected():
+        if 'connection' in locals():
             connection.close()
-            logger.info("Database connection closed")
 
-def upload_mapping(file_path, table_name):
+def get_vidal_mappings(cursor):
     """
-    Handle the upload of a mapping Excel file and create corresponding database table
+    Get all mappings from mapping_table where target_table is 'temp_vidal_claims'
+    Returns a dictionary mapping source columns to target columns
+    """
+    query = """
+    SELECT source_column, target_column, transformation_logic
+    FROM mapping_table 
+    WHERE target_table = 'temp_vidal_claims'
+    """
+    cursor.execute(query)
+    mappings = cursor.fetchall()
+    
+    # Create a mapping dictionary for easy lookup
+    mapping_dict = {}
+    for source_col, target_col, transform_logic in mappings:
+        mapping_dict[source_col] = {
+            'target_columns': [col.strip() for col in target_col.split(',')] if target_col else [],
+            'transformation_logic': transform_logic
+        }
+    
+    logger.info(f"Found {len(mapping_dict)} mappings for temp_vidal_claims table")
+    return mapping_dict
+
+def upload_vidal_data(file_path):
+    """
+    Upload Vidal claims data from Excel file using mappings from mapping_table.
+    Process:
+    1. Read Excel file
+    2. Get mappings from mapping_table
+    3. For each row:
+        - Map source columns to target columns
+        - Apply any transformation logic
+        - Insert into temp_vidal_claims
+    Args:
+        file_path (str): Path to the Excel file containing Vidal claims data
+    Returns:
+        dict: Result of the upload operation with status and details
     """
     try:
-        result = create_mapping_table_from_excel(file_path, table_name)
+        # Read the Excel file
+        df = pd.read_excel(file_path)
+        logger.info(f"Read {len(df)} rows from Excel file")
+        
+        connection = connect_to_mysql()
+        if not connection:
+            return {"error": "Database connection failed", "status": "error"}
+            
+        cursor = connection.cursor()
+        
+        # Get mappings
+        mappings = get_vidal_mappings(cursor)
+        if not mappings:
+            return {
+                "error": "No mappings found in mapping_table for temp_vidal_claims",
+                "status": "error"
+            }
+        
+        # Check which columns are missing but continue processing
+        available_columns = set(df.columns)
+        all_mapped_columns = set(mappings.keys())
+        missing_columns = all_mapped_columns - available_columns
+        usable_columns = all_mapped_columns & available_columns
+        
+        if not usable_columns:
+            return {
+                "error": "No mapped columns found in Excel file",
+                "status": "error"
+            }
+        
+        # Insert data into temp_vidal_claims
+        inserted_count = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                # Collect values for this row
+                insert_data = {}
+                
+                for source_col in usable_columns:
+                    mapping_info = mappings[source_col]
+                    value = str(row[source_col])
+                    
+                    # Apply transformation logic if exists
+                    if mapping_info['transformation_logic']:
+                        try:
+                            # Here you can add specific transformation logic
+                            # For example: date formatting, string operations, etc.
+                            pass
+                        except Exception as e:
+                            logger.warning(f"Transformation failed for {source_col}: {str(e)}")
+                    
+                    # Add value for each target column
+                    for target_col in mapping_info['target_columns']:
+                        insert_data[target_col.strip()] = value
+                
+                if insert_data:
+                    # Generate SQL for insert
+                    columns = ', '.join([f"`{col}`" for col in insert_data.keys()])
+                    placeholders = ', '.join(['%s'] * len(insert_data))
+                    insert_sql = f"""
+                    INSERT INTO temp_vidal_claims ({columns})
+                    VALUES ({placeholders})
+                    """
+                    cursor.execute(insert_sql, list(insert_data.values()))
+                    connection.commit()
+                    inserted_count += 1
+                
+            except Exception as e:
+                error_msg = f"Error in row {idx + 1}: {str(e)}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                continue
+        
+        result = {
+            "message": f"Successfully uploaded {inserted_count} rows to temp_vidal_claims",
+            "total_rows": len(df),
+            "inserted_rows": inserted_count,
+            "processed_columns": list(usable_columns),
+            "missing_columns": list(missing_columns),
+            "status": "success" if not missing_columns else "partial_success"
+        }
+        
+        if errors:
+            result["errors"] = errors
+            result["status"] = "partial_success"
+            
         return result
+        
     except Exception as e:
-        return {"error": f"Failed to process mapping file: {str(e)}"}
+        error_msg = f"Error uploading Vidal data: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        return {"error": error_msg, "status": "error"}
+        
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'connection' in locals():
+            connection.close()
