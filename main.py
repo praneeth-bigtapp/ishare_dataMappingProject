@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
 from werkzeug.utils import secure_filename
 import os
+import json
 import logging
 import traceback
 from datetime import datetime
@@ -10,6 +11,8 @@ from datamapping import get_vidal_mappings, upload_vidal_data, upload_mapping
 import mysql.connector
 from mysql.connector import Error
 import logging.handlers
+from schedularlogic import process_target_table ,schedule_processing   # Import the function
+from subprocess import Popen
 import yaml
 
 # Configure logging
@@ -169,78 +172,129 @@ def handle_vidal_upload():
             "status": "error"
         }), 500
 
-@app.route("/uploadVidalData", methods=["POST"])
-@cross_origin(origins="*")
-def upload_vidal_data_endpoint():
+@app.route("/processMClaims", methods=["POST"])
+def process_m_claims():
     """
-    API to upload Vidal claim data Excel file and process it:
-    1. Creates TEMP_CLAIM table based on Excel structure
-    2. Loads data into TEMP_CLAIM
-    3. Distributes data to target tables based on mapping configurations
+    Endpoint to process m_claims data.
     """
     try:
-        if 'file' not in request.files:
-            return jsonify({"error": "No file provided"})
-            
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({"error": "No file selected"})
-            
-        if not allowed_file(file.filename):
-            return jsonify({"error": f"File type not allowed. Allowed types: {', '.join(['xlsx', 'xls'])}"}), 400
-            
-        # Save file
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{timestamp}_{filename}")
-        file.save(save_path)
-        
-        logger.info(f"File saved to {save_path}")
-        
-        # Create temp table and load data
-        temp_result = create_temp_table_and_load_data(save_path)
-        if "error" in temp_result:
-            return jsonify(temp_result)
-            
-        # Distribute data to target tables
-        connection = connect_to_mysql()
-        if not connection:
-            return jsonify({"error": "Database connection failed"})
-            
-        cursor = connection.cursor()
-        dist_result = distribute_data_to_target_tables(connection, cursor)
-        
-        # Close database connection
-        cursor.close()
-        connection.close()
-        
-        # Return combined results
-        return jsonify({
-            "temp_table": temp_result,
-            "distribution": dist_result
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in upload_vidal_data: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)})
-
-@app.route("/createTempClaimMapping", methods=["POST"])
-@cross_origin(origins="*")
-def create_temp_claim_mappings():
-    """
-    API to create the TEMP_CLAIM to m_claims mapping table with predefined mappings
-    """
-    try:
-        result = create_temp_claim_mapping()
+        # Call the processing logic for `m_claims`
+        result = process_target_table("m_claims")
         if "error" in result:
             return jsonify(result), 500
-            
         return jsonify(result), 200
-                
     except Exception as e:
-        logger.error(f"Error in create_temp_claim_mappings: {str(e)}")
+        logging.error(f"Error in /processMClaims: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/processMClaimHealth", methods=["POST"])
+def process_m_claim_health():
+    """
+    Endpoint to process m_claim_health data.
+    """
+    try:
+        # Call the processing logic for `m_claim_health`
+        result = process_target_table("m_claim_health")
+        if "error" in result:
+            return jsonify(result), 500
+        return jsonify(result), 200
+    except Exception as e:
+        logging.error(f"Error in /processMClaimHealth: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/processMClaimSettleDetail", methods=["POST"])
+def process_m_claim_settle_detail():
+    """
+    Endpoint to process m_claim_settle_detail data.
+    """
+    try:
+        # Call the processing logic for `m_claim_settle_detail`
+        result = process_target_table("m_claim_settle_detail")
+        if "error" in result:
+            return jsonify(result), 500
+        return jsonify(result), 200
+    except Exception as e:
+        logging.error(f"Error in /processMClaimSettleDetail: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def schedule_processing_endpoint():
+    """
+    API to schedule processing for specific target tables with optional start_date and end_date filters.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Invalid request body"}), 400
+
+        scheduler_name = data.get("scheduler_name")
+        cron_expression = data.get("cron_expression")
+        target_table = data.get("target_table")
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+
+        if not scheduler_name or not cron_expression or not target_table:
+            return jsonify({
+                "error": "Missing required parameters: scheduler_name, cron_expression, or target_table"
+            }), 400
+
+        # Call the schedule processing function
+        result = schedule_processing(scheduler_name, cron_expression, start_date, end_date)
+        if "error" in result:
+            return jsonify(result), 500
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.error(f"Error in /scheduleProcessing: {str(e)}")
         logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/scheduleProcessing", methods=["POST"])
+def schedule_processing_api():
+    """
+    API to schedule processing and update scheduler_details.
+    """
+    try:
+        # Parse request payload
+        payload = request.json
+        if not payload:
+            return jsonify({"error": "Missing JSON payload"}), 400
+
+        scheduler_name = payload.get("scheduler_name")
+        cron_expression = payload.get("cron_expression")
+        target_table = payload.get("target_table")
+        start_date = payload.get("start_date")
+        end_date = payload.get("end_date")
+
+        # Validate required parameters
+        missing_params = []
+        if not scheduler_name:
+            missing_params.append("scheduler_name")
+        if not cron_expression:
+            missing_params.append("cron_expression")
+        if not target_table:
+            missing_params.append("target_table")
+
+        if missing_params:
+            return jsonify({"error": f"Missing required parameters: {', '.join(missing_params)}"}), 400
+
+        # Call the function to schedule processing
+        result = schedule_processing(
+            scheduler_name=scheduler_name,
+            cron_expression=cron_expression,
+            target_table=target_table,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if "error" in result:
+            return jsonify(result), 500
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        logging.error(f"Error in /scheduleProcessing: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # Run the Flask app

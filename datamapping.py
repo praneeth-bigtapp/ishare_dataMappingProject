@@ -11,8 +11,8 @@ def upload_mapping(file_path):
     Required columns in Excel:
     - tpa_id
     - source_database
-    - source_Table
-    - source_Column
+    - source_table
+    - source_column
     - target_database
     - target_table
     - target_column
@@ -25,8 +25,8 @@ def upload_mapping(file_path):
         
         # Validate required columns
         required_columns = [
-            'tpa_id', 'source_database', 'source_Table', 
-            'source_Column', 'target_database', 'target_table', 
+            'tpa_id', 'source_database', 'source_table',
+            'source_table', 'target_database', 'target_table',
             'target_column', 'transformation_logic'
         ]
         
@@ -49,8 +49,8 @@ def upload_mapping(file_path):
             mapping_id INT AUTO_INCREMENT PRIMARY KEY,
             tpa_id INT NOT NULL,
             source_database VARCHAR(255) NOT NULL,
-            source_Table VARCHAR(255) NOT NULL,
-            source_Column VARCHAR(255) NOT NULL,
+            source_table VARCHAR(255) NOT NULL,
+            source_column VARCHAR(255) NOT NULL,
             target_database VARCHAR(255) NOT NULL,
             target_table VARCHAR(255) NOT NULL,
             target_column VARCHAR(255) NOT NULL,
@@ -71,8 +71,8 @@ def upload_mapping(file_path):
                 insert_data = {
                     'tpa_id': row['tpa_id'],
                     'source_database': row['source_database'],
-                    'source_table': row['source_Table'],
-                    'source_column': row['source_Column'],
+                    'source_table': row['source_table'],
+                    'source_column': row['source_column'],
                     'target_database': row['target_database'],
                     'target_table': row['target_table'],
                     'target_column': row['target_column'],
