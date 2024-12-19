@@ -299,7 +299,7 @@ def schedule_processing_api():
     
 
 @app.route("/schedulerLog", methods=["GET"])
-def schedule_processing_api():
+def get_schedulor_log():
     """
     API to schedule processing and update scheduler_details.
     """
