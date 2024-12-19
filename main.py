@@ -296,6 +296,34 @@ def schedule_processing_api():
     except Exception as e:
         logging.error(f"Error in /scheduleProcessing: {str(e)}")
         return jsonify({"error": str(e)}), 500
+    
+
+@app.route("/schedulerLog", methods=["GET"])
+def schedule_processing_api():
+    """
+    API to schedule processing and update scheduler_details.
+    """
+    try:
+        # Database connection and setup
+        connection = connect_to_mysql()
+        if not connection:
+            raise Exception("Failed to connect to database")
+
+        cursor = connection.cursor(dictionary=True)
+        query = """SELECT * FROM schedulerlog"""
+        cursor.execute(query)
+        result = cursor.fetchall()
+        
+
+        return jsonify({
+            "success":True,
+            "data":result
+            }), 200
+
+    except Exception as e:
+        logging.error(f"Error in /scheduleProcessing: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 
 # Run the Flask app
 if __name__ == "__main__":
